@@ -3,6 +3,7 @@ package com.configvault.service;
 import com.configvault.dto.ConfigRequest;
 import com.configvault.dto.ConfigResponse;
 import com.configvault.exception.ResourceNotFoundException;
+import com.configvault.model.AuditAction;
 import com.configvault.model.Config;
 import com.configvault.model.ConfigVersion;
 import com.configvault.repository.ConfigRepository;
@@ -25,6 +26,7 @@ public class ConfigService {
 
     private final ConfigRepository configRepository;
     private final ConfigVersionRepository configVersionRepository;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public ConfigResponse createConfig(ConfigRequest request) {
@@ -45,6 +47,8 @@ public class ConfigService {
                 .commitMessage(request.getCommitMessage())
                 .build();
         version = configVersionRepository.save(version);
+
+        auditLogService.log(config.getId(), AuditAction.CREATE, "system", "Created config: " + config.getName());
 
         return mapToResponse(config, version);
     }
@@ -72,6 +76,8 @@ public class ConfigService {
                 .commitMessage(request.getCommitMessage())
                 .build();
         newVersion = configVersionRepository.save(newVersion);
+
+        auditLogService.log(config.getId(), AuditAction.UPDATE, "system", "Updated config content. New version: " + nextVersionNumber);
 
         return mapToResponse(config, newVersion);
     }

@@ -1,45 +1,30 @@
 Project Challenges and Solutions
 
-Commit 1: Initial Setup
-Issue: Encountered compatibility issues between Spring Boot 3.x and certain older libraries, specifically around the transition from javax to jakarta namespaces for Jakarta EE.
-Solution Approach: Ensured all dependencies (like validation and persistence API) used the jakarta namespace. Configured the Maven compiler plugin to strictly use Java 21 to avoid bytecode compatibility issues.
+Architectural and Database Modeling Challenges
 
-Commit 2: Database Models
-Issue: Managing the relationship between Config and ConfigVersion. Attempting to return raw entities directly from the controller caused infinite recursion during JSON serialization.
-Solution Approach: Implemented Data Transfer Objects (DTOs) to decouple the database entities from the API responses. This prevented Jackson from falling into infinite loops and kept the API contract clean and predictable.
+Issue: When setting up the relationship between Config and ConfigVersion, attempting to return raw entities directly from the controller caused infinite recursion during JSON serialization.
+Solution Approach: I implemented Data Transfer Objects (DTOs) to decouple the database entities from the API responses. This prevented Jackson from falling into infinite loops and kept the API contract clean and predictable.
 
-Commit 3: CRUD Services
-Issue: Exception handling was inconsistent. Database constraint violations were throwing generic 500 Internal Server Errors, exposing stack traces to the client and making it hard to debug.
-Solution Approach: Created a GlobalExceptionHandler using @ControllerAdvice. Caught specific exceptions like ResourceNotFoundException and MethodArgumentNotValidException to return a standardized JSON error shape with appropriate HTTP status codes (404 and 400).
+Issue: Exception handling was initially inconsistent. Database constraint violations were throwing generic 500 Internal Server Errors, exposing stack traces to the client and making it hard to debug client-side.
+Solution Approach: I created a GlobalExceptionHandler using @ControllerAdvice. By catching specific exceptions like ResourceNotFoundException and MethodArgumentNotValidException, I was able to return a standardized JSON error shape with appropriate HTTP status codes like 404 and 400.
 
-Commit 4: Diff and History
-Issue: Generating accurate line-by-line diffs was complex to write from scratch and prone to edge cases, especially regarding different operating system line endings (CRLF vs LF).
-Solution Approach: Integrated the java-diff-utils library to handle the heavy lifting of generating unified diff patches. Ensured that string inputs were normalized before passing them into the diff generator to avoid false positive changes based purely on hidden newline characters.
+Business Logic and Versioning Challenges
 
-Commit 5: Audit Logging
-Issue: Tying audit logs directly into the main business logic created tight coupling. If a configuration update failed, the audit log for the attempt was completely lost due to the transaction rolling back.
-Solution Approach: Extracted the logging logic into a dedicated AuditLogService. While currently sharing the transaction for data consistency, this abstraction sets the foundation to easily move audit logging to an asynchronous event-driven model in the future using @TransactionalEventListener.
+Issue: Generating accurate line-by-line diffs for the version history was complex to write from scratch. It was highly prone to edge cases, especially regarding different operating system line endings causing false positive diffs.
+Solution Approach: Rather than reinventing the wheel, I integrated the java-diff-utils library to handle the heavy lifting of generating unified diff patches. I ensured that string inputs were normalized to uniform line endings before passing them into the diff generator.
 
-Commit 6: Environment Promotion and Rollback
-Issue: Promoting a configuration to a new environment required copying data while maintaining a clear history of where the configuration came from.
-Solution Approach: Designed the promotion logic to clone the latest content into a brand new Config entity for the target environment, rather than mutating the original. Explicit audit trail entries were added to both the source and target configurations to establish a clear lineage.
+Issue: Promoting a configuration to a new environment required copying data while maintaining a clear history of where the configuration originally came from.
+Solution Approach: I designed the promotion logic to clone the latest content into a brand new Config entity for the target environment, rather than mutating the original. Explicit audit trail entries were added to both the source and target configurations to establish a clear lineage.
 
-Commit 7: Security and JWT
-Issue: Spring Security 6 introduced major deprecations, removing the traditional WebSecurityConfigurerAdapter which broke many older tutorials and examples.
-Solution Approach: Migrated to the modern component-based security configuration by defining a SecurityFilterChain bean. Created a custom JwtAuthenticationFilter extending OncePerRequestFilter to manually extract, validate, and inject the authenticated user into the SecurityContextHolder on every request.
+Security and Authentication Hurdles
 
-Commit 8: OpenAPI Swagger UI
-Issue: Swagger UI was being blocked by the new Spring Security configuration. Even when it loaded, it lacked a way to pass the JWT token to the backend, rendering secured endpoints untestable via the UI.
-Solution Approach: Explicitly whitelisted the swagger-ui and api-docs paths in the SecurityFilterChain. Created an OpenApiConfig bean to programmatically declare a Bearer Auth security scheme, which automatically added an Authorize button to the Swagger interface.
+Issue: Upgrading to Spring Security 6 introduced major deprecations. The traditional WebSecurityConfigurerAdapter was removed, which broke many older approaches to setting up JWT authentication.
+Solution Approach: I migrated to the modern component-based security configuration by defining a SecurityFilterChain bean. I then created a custom JwtAuthenticationFilter extending OncePerRequestFilter to manually extract, validate, and inject the authenticated user into the SecurityContextHolder.
 
-Commit 9: Unit Testing
-Issue: The default @SpringBootTest was failing locally and in CI pipelines because it attempted to boot the full application context and connect to a local PostgreSQL instance that was not running.
-Solution Approach: Deleted the default integration test. Shifted the testing strategy to focus strictly on unit testing the service layer using JUnit 5 and @ExtendWith(MockitoExtension.class). This allowed the business logic to be tested in isolation rapidly without needing a live database.
+Issue: After securing the application, Swagger UI was completely blocked. Even after whitelisting the paths, it lacked a way to pass the JWT token to the backend, rendering secured endpoints untestable via the UI.
+Solution Approach: I explicitly whitelisted the swagger-ui and api-docs paths in the SecurityFilterChain. Then, I created an OpenApiConfig bean to programmatically declare a Bearer Auth security scheme, which automatically added an Authorize button to the Swagger interface.
 
-Commit 10: Docker and Docker Compose
-Issue: The Spring Boot container was starting up faster than the PostgreSQL container could initialize. This caused the application to throw connection refused errors and crash immediately on startup.
-Solution Approach: Configured a healthcheck for the postgres service in the docker-compose.yml file. Updated the app service to use depends_on with the condition: service_healthy, forcing the application to wait until the database was fully ready to accept connections.
+Infrastructure and Deployment Issues
 
-Commit 11: GitHub Actions CI
-Issue: The CI pipeline was downloading all Maven dependencies from scratch on every run, causing the build to take several minutes and slowing down the development cycle.
-Solution Approach: Leveraged the setup-java action's built-in caching mechanism (cache: maven). This cached the .m2 repository between runs, drastically reducing build times and only downloading new dependencies when the pom.xml was modified.
+Issue: When setting up docker-compose, the Spring Boot container was starting up faster than the PostgreSQL container could fully initialize. This caused the application to throw connection refused errors and crash immediately on startup.
+Solution Approach: I configured a healthcheck for the postgres service in the docker-compose.yml file. I updated the app service to use the depends_on block with the condition: service_healthy, forcing the application to wait until the database was fully ready to accept connections.

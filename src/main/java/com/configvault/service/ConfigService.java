@@ -13,6 +13,9 @@ import com.github.difflib.DiffUtils;
 import com.github.difflib.UnifiedDiffUtils;
 import com.github.difflib.patch.Patch;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,13 +31,39 @@ public class ConfigService {
     private final ConfigVersionRepository configVersionRepository;
     private final AuditLogService auditLogService;
 
+    private String getCurrentUsername() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getName() != null && !auth.getName().equals("anonymousUser")) {
+            return auth.getName();
+        }
+        return "system";
+    }
+
+    private void checkDeveloperEnvironment(com.configvault.model.Environment env) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_DEVELOPER"))) {
+            if (env != com.configvault.model.Environment.DEV) {
+                throw new AccessDeniedException("Developers can only modify DEV environment configs");
+            }
+        }
+    }
+
+    private void checkAdminOnly() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_DEVELOPER"))) {
+            throw new AccessDeniedException("This action requires ADMIN role");
+        }
+    }
+
     @Transactional
     public ConfigResponse createConfig(ConfigRequest request) {
+        checkDeveloperEnvironment(request.getEnvironment());
+        String currentUser = getCurrentUsername();
         // Create Config
         Config config = Config.builder()
                 .name(request.getName())
                 .environment(request.getEnvironment())
-                .createdBy("system") // Will be updated in COMMIT 7
+                .createdBy(currentUser)
                 .build();
         config = configRepository.save(config);
 
@@ -43,12 +72,12 @@ public class ConfigService {
                 .config(config)
                 .content(request.getContent())
                 .versionNumber(1)
-                .changedBy("system") // Will be updated in COMMIT 7
+                .changedBy(currentUser)
                 .commitMessage(request.getCommitMessage())
                 .build();
         version = configVersionRepository.save(version);
 
-        auditLogService.log(config.getId(), AuditAction.CREATE, "system", "Created config: " + config.getName());
+        auditLogService.log(config.getId(), AuditAction.CREATE, currentUser, "Created config: " + config.getName());
 
         return mapToResponse(config, version);
     }
@@ -57,6 +86,11 @@ public class ConfigService {
     public ConfigResponse updateConfig(Long id, ConfigRequest request) {
         Config config = configRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Config not found with id: " + id));
+
+        checkDeveloperEnvironment(config.getEnvironment());
+        checkDeveloperEnvironment(request.getEnvironment());
+        
+        String currentUser = getCurrentUsername();
 
         // Update Config metadata if necessary
         config.setName(request.getName());
@@ -72,12 +106,12 @@ public class ConfigService {
                 .config(config)
                 .content(request.getContent())
                 .versionNumber(nextVersionNumber)
-                .changedBy("system") // Will be updated in COMMIT 7
+                .changedBy(currentUser)
                 .commitMessage(request.getCommitMessage())
                 .build();
         newVersion = configVersionRepository.save(newVersion);
 
-        auditLogService.log(config.getId(), AuditAction.UPDATE, "system", "Updated config content. New version: " + nextVersionNumber);
+        auditLogService.log(config.getId(), AuditAction.UPDATE, currentUser, "Updated config content. New version: " + nextVersionNumber);
 
         return mapToResponse(config, newVersion);
     }
@@ -131,6 +165,9 @@ public class ConfigService {
 
     @Transactional
     public ConfigResponse rollback(Long configId, Integer versionNumber) {
+        checkAdminOnly();
+        String currentUser = getCurrentUsername();
+        
         Config config = configRepository.findById(configId)
                 .orElseThrow(() -> new ResourceNotFoundException("Config not found with id: " + configId));
 
@@ -144,18 +181,21 @@ public class ConfigService {
                 .config(config)
                 .content(targetVersion.getContent())
                 .versionNumber(nextVersionNumber)
-                .changedBy("system") // Will be updated in COMMIT 7
+                .changedBy(currentUser)
                 .commitMessage("Rollback to version " + versionNumber)
                 .build();
         newVersion = configVersionRepository.save(newVersion);
 
-        auditLogService.log(config.getId(), AuditAction.ROLLBACK, "system", "Rolled back to version " + versionNumber);
+        auditLogService.log(config.getId(), AuditAction.ROLLBACK, currentUser, "Rolled back to version " + versionNumber);
 
         return mapToResponse(config, newVersion);
     }
 
     @Transactional
     public ConfigResponse promote(Long configId, com.configvault.model.Environment targetEnvironment) {
+        checkAdminOnly();
+        String currentUser = getCurrentUsername();
+        
         Config originalConfig = configRepository.findById(configId)
                 .orElseThrow(() -> new ResourceNotFoundException("Config not found with id: " + configId));
 
@@ -165,7 +205,7 @@ public class ConfigService {
         Config promotedConfig = Config.builder()
                 .name(originalConfig.getName())
                 .environment(targetEnvironment)
-                .createdBy("system") // Will be updated in COMMIT 7
+                .createdBy(currentUser)
                 .build();
         promotedConfig = configRepository.save(promotedConfig);
 
@@ -173,13 +213,13 @@ public class ConfigService {
                 .config(promotedConfig)
                 .content(latestVersion.getContent())
                 .versionNumber(1)
-                .changedBy("system") // Will be updated in COMMIT 7
+                .changedBy(currentUser)
                 .commitMessage("Promoted from " + originalConfig.getEnvironment() + " config id: " + configId)
                 .build();
         newVersion = configVersionRepository.save(newVersion);
 
-        auditLogService.log(configId, AuditAction.PROMOTE, "system", "Promoted to " + targetEnvironment + " as new config id " + promotedConfig.getId());
-        auditLogService.log(promotedConfig.getId(), AuditAction.CREATE, "system", "Created via promotion from config id " + configId);
+        auditLogService.log(configId, AuditAction.PROMOTE, currentUser, "Promoted to " + targetEnvironment + " as new config id " + promotedConfig.getId());
+        auditLogService.log(promotedConfig.getId(), AuditAction.CREATE, currentUser, "Created via promotion from config id " + configId);
 
         return mapToResponse(promotedConfig, newVersion);
     }

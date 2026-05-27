@@ -53,4 +53,16 @@ public class ConfigController {
         String diff = configService.getDiff(id, v1, v2);
         return new ResponseEntity<>(diff, HttpStatus.OK);
     }
+
+    @PostMapping("/{id}/rollback/{version}")
+    public ResponseEntity<ConfigResponse> rollback(@PathVariable Long id, @PathVariable Integer version) {
+        ConfigResponse response = configService.rollback(id, version);
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
+
+    @PostMapping("/{id}/promote")
+    public ResponseEntity<ConfigResponse> promote(@PathVariable Long id, @RequestParam com.configvault.model.Environment to) {
+        ConfigResponse response = configService.promote(id, to);
+        return new ResponseEntity<>(response, HttpStatus.CREATED);
+    }
 }

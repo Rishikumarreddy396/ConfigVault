@@ -129,6 +129,61 @@ public class ConfigService {
         return String.join("\n", unifiedDiff);
     }
 
+    @Transactional
+    public ConfigResponse rollback(Long configId, Integer versionNumber) {
+        Config config = configRepository.findById(configId)
+                .orElseThrow(() -> new ResourceNotFoundException("Config not found with id: " + configId));
+
+        ConfigVersion targetVersion = configVersionRepository.findByConfigIdAndVersionNumber(configId, versionNumber)
+                .orElseThrow(() -> new ResourceNotFoundException("Version " + versionNumber + " not found for config id: " + configId));
+
+        List<ConfigVersion> versions = configVersionRepository.findByConfigIdOrderByVersionNumberDesc(configId);
+        int nextVersionNumber = versions.isEmpty() ? 1 : versions.get(0).getVersionNumber() + 1;
+
+        ConfigVersion newVersion = ConfigVersion.builder()
+                .config(config)
+                .content(targetVersion.getContent())
+                .versionNumber(nextVersionNumber)
+                .changedBy("system") // Will be updated in COMMIT 7
+                .commitMessage("Rollback to version " + versionNumber)
+                .build();
+        newVersion = configVersionRepository.save(newVersion);
+
+        auditLogService.log(config.getId(), AuditAction.ROLLBACK, "system", "Rolled back to version " + versionNumber);
+
+        return mapToResponse(config, newVersion);
+    }
+
+    @Transactional
+    public ConfigResponse promote(Long configId, com.configvault.model.Environment targetEnvironment) {
+        Config originalConfig = configRepository.findById(configId)
+                .orElseThrow(() -> new ResourceNotFoundException("Config not found with id: " + configId));
+
+        List<ConfigVersion> versions = configVersionRepository.findByConfigIdOrderByVersionNumberDesc(configId);
+        ConfigVersion latestVersion = versions.isEmpty() ? new ConfigVersion() : versions.get(0);
+
+        Config promotedConfig = Config.builder()
+                .name(originalConfig.getName())
+                .environment(targetEnvironment)
+                .createdBy("system") // Will be updated in COMMIT 7
+                .build();
+        promotedConfig = configRepository.save(promotedConfig);
+
+        ConfigVersion newVersion = ConfigVersion.builder()
+                .config(promotedConfig)
+                .content(latestVersion.getContent())
+                .versionNumber(1)
+                .changedBy("system") // Will be updated in COMMIT 7
+                .commitMessage("Promoted from " + originalConfig.getEnvironment() + " config id: " + configId)
+                .build();
+        newVersion = configVersionRepository.save(newVersion);
+
+        auditLogService.log(configId, AuditAction.PROMOTE, "system", "Promoted to " + targetEnvironment + " as new config id " + promotedConfig.getId());
+        auditLogService.log(promotedConfig.getId(), AuditAction.CREATE, "system", "Created via promotion from config id " + configId);
+
+        return mapToResponse(promotedConfig, newVersion);
+    }
+
     private ConfigResponse mapToResponse(Config config, ConfigVersion version) {
         return ConfigResponse.builder()
                 .id(config.getId())

@@ -7,10 +7,15 @@ import com.configvault.model.Config;
 import com.configvault.model.ConfigVersion;
 import com.configvault.repository.ConfigRepository;
 import com.configvault.repository.ConfigVersionRepository;
+import com.configvault.dto.ConfigVersionResponse;
+import com.github.difflib.DiffUtils;
+import com.github.difflib.UnifiedDiffUtils;
+import com.github.difflib.patch.Patch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -91,6 +96,33 @@ public class ConfigService {
         }).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<ConfigVersionResponse> getHistory(Long configId) {
+        if (!configRepository.existsById(configId)) {
+            throw new ResourceNotFoundException("Config not found with id: " + configId);
+        }
+        return configVersionRepository.findByConfigIdOrderByVersionNumberDesc(configId).stream()
+                .map(this::mapToVersionResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public String getDiff(Long configId, Integer v1, Integer v2) {
+        ConfigVersion version1 = configVersionRepository.findByConfigIdAndVersionNumber(configId, v1)
+                .orElseThrow(() -> new ResourceNotFoundException("Version " + v1 + " not found for config id: " + configId));
+        ConfigVersion version2 = configVersionRepository.findByConfigIdAndVersionNumber(configId, v2)
+                .orElseThrow(() -> new ResourceNotFoundException("Version " + v2 + " not found for config id: " + configId));
+
+        List<String> original = Arrays.asList(version1.getContent().split("\\r?\\n"));
+        List<String> revised = Arrays.asList(version2.getContent().split("\\r?\\n"));
+
+        Patch<String> patch = DiffUtils.diff(original, revised);
+        List<String> unifiedDiff = UnifiedDiffUtils.generateUnifiedDiff(
+                "v" + v1, "v" + v2, original, patch, 3);
+        
+        return String.join("\n", unifiedDiff);
+    }
+
     private ConfigResponse mapToResponse(Config config, ConfigVersion version) {
         return ConfigResponse.builder()
                 .id(config.getId())
@@ -101,6 +133,18 @@ public class ConfigService {
                 .createdAt(config.getCreatedAt())
                 .updatedAt(config.getUpdatedAt())
                 .createdBy(config.getCreatedBy())
+                .build();
+    }
+
+    private ConfigVersionResponse mapToVersionResponse(ConfigVersion version) {
+        return ConfigVersionResponse.builder()
+                .id(version.getId())
+                .configId(version.getConfig().getId())
+                .content(version.getContent())
+                .versionNumber(version.getVersionNumber())
+                .changedBy(version.getChangedBy())
+                .changedAt(version.getChangedAt())
+                .commitMessage(version.getCommitMessage())
                 .build();
     }
 }

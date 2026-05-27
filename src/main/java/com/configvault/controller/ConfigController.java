@@ -41,4 +41,16 @@ public class ConfigController {
         ConfigResponse response = configService.updateConfig(id, request);
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
+
+    @GetMapping("/{id}/history")
+    public ResponseEntity<List<com.configvault.dto.ConfigVersionResponse>> getHistory(@PathVariable Long id) {
+        List<com.configvault.dto.ConfigVersionResponse> history = configService.getHistory(id);
+        return new ResponseEntity<>(history, HttpStatus.OK);
+    }
+
+    @GetMapping("/{id}/diff")
+    public ResponseEntity<String> getDiff(@PathVariable Long id, @RequestParam Integer v1, @RequestParam Integer v2) {
+        String diff = configService.getDiff(id, v1, v2);
+        return new ResponseEntity<>(diff, HttpStatus.OK);
+    }
 }
